@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="카테고리, 진행률, 검색, 정렬을 지원하는 할 일 관리 앱">
+  <title>My Tasks</title>
+  <script>
+    // CSS 적용 전에 테마를 정해 첫 화면 깜빡임을 막는다.
+    // (저장된 값이 없으면 운영체제 다크 모드 설정을 따른다)
+    (function () {
+      var theme;
+      try { theme = localStorage.getItem('todoTheme'); } catch (e) { /* 저장소 사용 불가 */ }
+      if (theme !== 'dark' && theme !== 'light') {
+        theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip-link" href="#todo-input">할 일 입력으로 바로가기</a>
+
+  <!--
+    넓은 화면 레이아웃
+    ┌──────────┬──────────────────────┬────────────┐
+    │ sidebar  │ main                 │ insights   │  1280px 이상: 3단
+    │ 메뉴·데이터 │ 입력·검색·목록          │ 격언·진행률   │  900~1279px: 2단 (insights가 main 위로)
+    └──────────┴──────────────────────┴────────────┘  899px 이하: 1단 (모바일 버전과 같은 순서)
+  -->
+  <div class="app-shell">
+    <div class="sidebar">
+      <header class="brand">
+        <div class="title-row">
+          <h1 id="app-title" class="app-title">My Tasks</h1>
+          <span id="remaining-badge" class="badge" title="남은 할 일">
+            <span class="visually-hidden">남은 할 일 </span><span id="remaining-count">0</span><span class="visually-hidden">개</span>
+          </span>
+        </div>
+      </header>
+
+      <nav class="sidebar-section filter-section" aria-labelledby="filter-heading">
+        <h2 id="filter-heading" class="section-label">카테고리</h2>
+        <div id="filter-bar" class="filter-bar" role="group" aria-label="카테고리 필터">
+          <button type="button" class="filter-btn" data-filter="all" title="전체 (Alt+1)">
+            <span class="filter-dot" aria-hidden="true"></span><span class="filter-label">전체</span><span class="filter-count" data-count="all" aria-hidden="true">0</span>
+          </button>
+          <button type="button" class="filter-btn" data-filter="work" title="업무 (Alt+2)">
+            <span class="filter-dot" aria-hidden="true"></span><span class="filter-label">업무</span><span class="filter-count" data-count="work" aria-hidden="true">0</span>
+          </button>
+          <button type="button" class="filter-btn" data-filter="personal" title="개인 (Alt+3)">
+            <span class="filter-dot" aria-hidden="true"></span><span class="filter-label">개인</span><span class="filter-count" data-count="personal" aria-hidden="true">0</span>
+          </button>
+          <button type="button" class="filter-btn" data-filter="study" title="공부 (Alt+4)">
+            <span class="filter-dot" aria-hidden="true"></span><span class="filter-label">공부</span><span class="filter-count" data-count="study" aria-hidden="true">0</span>
+          </button>
+        </div>
+      </nav>
+
+      <section class="sidebar-section data-section" aria-labelledby="data-heading">
+        <h2 id="data-heading" class="section-label">데이터</h2>
+        <div class="sidebar-actions">
+          <button id="trash-btn" type="button" class="text-btn" title="최근 삭제한 항목 (Ctrl+Z로 마지막 삭제 복구)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg>
+            <span>최근 삭제</span><span id="trash-count" class="count-pill"></span>
+          </button>
+          <button id="export-btn" type="button" class="text-btn" title="JSON 파일로 내보내기">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+            <span>내보내기</span>
+          </button>
+          <button id="import-btn" type="button" class="text-btn" title="JSON 파일에서 가져오기">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V9"/><path d="m7 14 5-5 5 5"/><path d="M5 4h14"/></svg>
+            <span>가져오기</span>
+          </button>
+          <input id="import-file" type="file" accept=".json,application/json" hidden>
+        </div>
+      </section>
+
+      <!-- 단축키 안내: 접을 수 있음. 화면 높이가 충분하면 처음부터 펼친다 (아래 스크립트) -->
+      <details id="shortcut-panel" class="sidebar-section shortcut-hint">
+        <summary class="section-label">단축키</summary>
+        <ul class="shortcut-list">
+          <li><span>새 할 일</span><span><kbd>Alt</kbd>+<kbd>N</kbd></span></li>
+          <li><span>필터 전환</span><span><kbd>Alt</kbd>+<kbd>1</kbd>~<kbd>4</kbd></span></li>
+          <li><span>테마 전환</span><span><kbd>Alt</kbd>+<kbd>D</kbd></span></li>
+          <li><span>검색</span><span><kbd>/</kbd></span></li>
+          <li><span>삭제 취소</span><span><kbd>Ctrl</kbd>+<kbd>Z</kbd></span></li>
+          <li><span>항목 이동</span><span><kbd>↑</kbd><kbd>↓</kbd></span></li>
+          <li><span>완료 · 수정</span><span><kbd>Space</kbd> <kbd>Enter</kbd></span></li>
+          <li><span>삭제</span><span><kbd>Delete</kbd></span></li>
+        </ul>
+      </details>
+      <script>
+        // 사이드바가 넘치지 않을 만큼 화면이 높을 때만 단축키 목록을 펼쳐 둔다
+        if (window.innerHeight >= 900) document.getElementById('shortcut-panel').open = true;
+      </script>
+    </div>
+
+    <main class="main" aria-labelledby="view-title">
+      <header class="main-header">
+        <h2 id="view-title" class="view-title">전체 할 일</h2>
+        <p id="view-count" class="view-count"></p>
+      </header>
+
+      <section class="composer" aria-label="새 할 일 추가">
+        <form id="todo-form" class="todo-form" autocomplete="off" aria-label="새 할 일 추가">
+          <select id="category-select" class="category-select" aria-label="카테고리">
+            <option value="work">업무</option>
+            <option value="personal">개인</option>
+            <option value="study">공부</option>
+          </select>
+          <input id="todo-input" class="todo-input" type="text" placeholder="할 일을 입력하세요" aria-label="새 할 일" aria-describedby="category-hint duplicate-hint" title="새 할 일 (Alt+N)" maxlength="200">
+          <button type="submit" class="add-btn">추가</button>
+        </form>
+        <!-- 입력 중 안내: 키워드 자동 분류 결과, 같은 할 일이 이미 있을 때의 경고 -->
+        <div class="form-hints">
+          <p id="category-hint" class="category-hint" aria-live="polite"></p>
+          <p id="duplicate-hint" class="duplicate-hint" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <div class="toolbar">
+        <div class="search-box" role="search">
+          <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="search-input" class="search-input" type="search" placeholder="할 일 검색" aria-label="할 일 검색" title="검색 (/)" autocomplete="off" maxlength="200">
+        </div>
+        <select id="sort-select" class="sort-select" aria-label="정렬 방식" title="정렬 방식">
+          <option value="status">완료 상태순</option>
+          <option value="created">생성일순 (최신)</option>
+          <option value="category">카테고리순</option>
+          <option value="manual">직접 정렬</option>
+        </select>
+      </div>
+
+      <ul id="todo-list" class="todo-list" aria-label="할 일 목록" aria-describedby="list-help"></ul>
+      <p id="list-help" class="visually-hidden">위·아래 화살표 키로 항목 사이를 이동하고, Enter로 수정, Delete로 삭제, Space로 완료를 표시합니다. 왼쪽 손잡이를 끌거나, 손잡이에 포커스를 두고 위·아래 화살표 키를 누르면 순서를 바꿀 수 있습니다.</p>
+      <p id="empty-message" class="empty-message hidden">할 일이 없습니다. 추가해보세요!</p>
+
+      <div class="list-footer">
+        <button id="clear-completed" type="button" class="clear-btn">완료된 항목 모두 삭제</button>
+      </div>
+    </main>
+
+    <div class="insights">
+      <!-- 다크 모드 스위치: 화면 오른쪽 위 (1단 레이아웃에서는 제목 줄 오른쪽) -->
+      <div class="theme-row">
+        <button id="theme-toggle" class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="다크 모드" title="다크 모드 전환 (Alt+D)">
+          <span class="theme-label" aria-hidden="true">다크 모드</span>
+          <span class="switch-track">
+            <span class="switch-thumb">
+              <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+              <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+            </span>
+          </span>
+        </button>
+      </div>
+
+      <!-- 오늘의 격언: 날짜별로 정해지고, 새로고침 버튼으로 다른 격언을 볼 수 있다 -->
+      <figure id="quote" class="quote" aria-label="오늘의 격언">
+        <blockquote id="quote-text" class="quote-text"></blockquote>
+        <figcaption id="quote-author" class="quote-author"></figcaption>
+        <button id="quote-refresh" class="icon-btn quote-refresh" type="button" aria-label="다른 격언 보기" title="다른 격언 보기">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+        </button>
+      </figure>
+
+      <section class="stats" aria-labelledby="stats-title">
+        <h2 id="stats-title" class="stats-title">진행률</h2>
+        <div class="stats-header">
+          <span class="stats-label">전체</span>
+          <span id="overall-text" class="stats-value">0/0 완료 (0%)</span>
+        </div>
+        <div id="overall-progress" class="progress" role="progressbar" aria-label="전체 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="progress-fill"></div>
+        </div>
+
+        <div class="stats-categories">
+          <div class="stats-cat" data-category="work">
+            <div class="stats-cat-header"><span>업무</span><span class="stats-cat-count">0/0</span></div>
+            <div class="progress progress-sm" role="progressbar" aria-label="업무 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill"></div></div>
+          </div>
+          <div class="stats-cat" data-category="personal">
+            <div class="stats-cat-header"><span>개인</span><span class="stats-cat-count">0/0</span></div>
+            <div class="progress progress-sm" role="progressbar" aria-label="개인 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill"></div></div>
+          </div>
+          <div class="stats-cat" data-category="study">
+            <div class="stats-cat-header"><span>공부</span><span class="stats-cat-count">0/0</span></div>
+            <div class="progress progress-sm" role="progressbar" aria-label="공부 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill"></div></div>
+          </div>
+        </div>
+
+        <p class="stats-today">오늘 추가된 할 일 <strong id="today-count">0</strong>개</p>
+        <p id="cheer-message" class="cheer"></p>
+      </section>
+    </div>
+  </div>
+
+  <!-- 토스트: 동작 결과 피드백 (스크린 리더에도 읽힘) -->
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true">
+    <span id="toast-message" class="toast-message"></span>
+    <button id="toast-action" type="button" class="toast-action" hidden></button>
+  </div>
+
+  <!-- 화면에는 보이지 않고 스크린 리더에만 읽어 주는 알림 영역 -->
+  <div id="sr-announcer" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- 공용 확인 다이얼로그 (중복 경고, 일괄 삭제, 가져오기, 최근 삭제 목록) -->
+  <dialog id="app-dialog" class="dialog" aria-labelledby="dialog-title" aria-describedby="dialog-message">
+    <form method="dialog" class="dialog-form">
+      <h2 id="dialog-title" class="dialog-title"></h2>
+      <p id="dialog-message" class="dialog-message"></p>
+      <div id="dialog-body" class="dialog-body"></div>
+      <div id="dialog-actions" class="dialog-actions"></div>
+    </form>
+  </dialog>
+
+  <script src="script.js"></script>
+</body>
+</html>
